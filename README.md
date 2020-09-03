@@ -6,6 +6,8 @@ This repository provides source code for DCASE2020 task 6 [SJTU submission](http
 
 The dataset used for task 6 is [Clotho](https://arxiv.org/abs/1910.09387). To use our pretrained model, the vocabulary file is provided in `data/clotho/vocab.pth`.
 
+For convenience, we rename all the filenames. The comparison between original and new filenames can be found in `data/clotho/filename.csv`. Original caption label files are also reformatted to json files `data/clotho/dev.json` and `data/clotho/eval.json`.
+
 
 # Prequisite Installation
 
@@ -35,7 +37,7 @@ export KALDI_ROOT=/PATH/TO/YOUR/KALDI
 
 The kaldi scp format requires a tab or space separated line with the information: `FEATURENAME WAVEPATH`
 
-For example, to extract feature, assume the raw data is placed in `DATA_DIR` (`data/clotho/wav` here) and you will store features in `FEATURE_DIR` (`data/clotho` here):
+For example, to extract feature, assume the raw wave data are placed in `DATA_DIR` (`data/clotho/wav` here) and you will store features in `FEATURE_DIR` (`data/clotho` here):
 
 ```bash
 DATA_DIR=`pwd`/data/clotho/wav
@@ -47,7 +49,7 @@ rm $FEATURE_DIR/tmp.ark
 
 The kaldi scp file can be further split into a development scp and an evaluation scp:
 ```bash
-python utils/split_scp.py $FEATURE_DIR/logmel.scp $FEATURE_DIR/zh_eval.json
+python utils/split_scp.py $FEATURE_DIR/logmel.scp $FEATURE_DIR/eval.json
 ```
 
 ## Training Configurator
