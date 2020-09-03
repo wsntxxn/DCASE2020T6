@@ -48,21 +48,23 @@ class BaseRunner(object):
             ascii=True
         ):
             feat = batch[0]
-            feat = feat.reshape(-1, feat.shape[-1])
-            scaler.partial_fit(feat)
+            feat_lens = batch[-2]
+            packed_feat = torch.nn.utils.rnn.pack_padded_sequence(
+                feat, feat_lens, batch_first=True, enforce_sorted=False).data
+            scaler.partial_fit(packed_feat)
             inputdim = feat.shape[-1]
         assert inputdim > 0, "Reading inputstream failed"
 
         augments = train_util.parse_augments(config["augments"])
-        cv_keys = np.random.choice(
+        train_keys = np.random.choice(
             caption_df["key"].unique(), 
-            int(len(caption_df["key"].unique()) * (1 - config["train_percent"] / 100.)), 
+            int(len(caption_df["key"].unique()) * (config["train_percent"] / 100.)), 
             replace=False
         )
-        cv_df = caption_df[caption_df["key"].apply(lambda x: x in cv_keys)]
-        train_df = caption_df[~caption_df.index.isin(cv_df.index)]
+        train_df = caption_df[caption_df["key"].apply(lambda x: x in train_keys)]
+        val_df = caption_df[~caption_df.index.isin(train_df.index)]
 
-        trainloader = torch.utils.data.DataLoader(
+        train_loader = torch.utils.data.DataLoader(
             SJTUDataset(
                 kaldi_stream=config["feature_stream"],
                 caption_df=train_df,
@@ -76,14 +78,14 @@ class BaseRunner(object):
 
         if config["zh"]:
             train_key2refs = train_df.groupby("key")["tokens"].apply(list).to_dict()
-            cv_key2refs = cv_df.groupby("key")["tokens"].apply(list).to_dict()
+            val_key2refs = val_df.groupby("key")["tokens"].apply(list).to_dict()
         else:
             train_key2refs = train_df.groupby("key")["caption"].apply(list).to_dict()
-            cv_key2refs = cv_df.groupby("key")["caption"].apply(list).to_dict()
-        cvloader = torch.utils.data.DataLoader(
+            val_key2refs = val_df.groupby("key")["caption"].apply(list).to_dict()
+        val_loader = torch.utils.data.DataLoader(
             SJTUDataset(
                 kaldi_stream=config["feature_stream"],
-                caption_df=cv_df,
+                caption_df=val_df,
                 vocabulary=vocabulary,
                 transform=scaler.transform
             ),
@@ -91,13 +93,13 @@ class BaseRunner(object):
             collate_fn=collate_fn([0, 1]),
             **config["dataloader_args"])
 
-        return trainloader, cvloader, {
+        return train_loader, val_loader, {
             "scaler": scaler, "inputdim": inputdim, 
-            "train_key2refs": train_key2refs, "cv_key2refs": cv_key2refs
+            "train_key2refs": train_key2refs, "val_key2refs": val_key2refs
         }
 
     @staticmethod
-    def _get_model(config, vocab_size):
+    def _get_model(config, vocabulary):
         raise NotImplementedError
 
     def _forward(self, model, batch, mode, **kwargs):
@@ -131,11 +133,14 @@ class BaseRunner(object):
 
         dump = torch.load(os.path.join(experiment_path, "saved.pth"),
                           map_location="cpu")
-        model = dump["model"]
+        # Load previous training config
+        config = dump["config"]
+
+        vocab_size = len(torch.load(config["vocab_file"]))
+        model = self._get_model(config, vocab_size)
+        model.load_state_dict(dump["model"])
         # Some scaler (sklearn standardscaler)
         scaler = dump["scaler"]
-        # Also load previous training config
-        config = dump["config"]
         vocabulary = torch.load(config["vocab_file"])
         zh = config["zh"]
         model = model.to(self.device)
@@ -149,9 +154,7 @@ class BaseRunner(object):
             batch_size=16,
             num_workers=0)
 
-        if max_length is None:
-            max_length = model.max_length
-        width_length = max_length * 4
+        width_length = 80
         pbar = ProgressBar(persist=False, ascii=True)
         writer = open(os.path.join(experiment_path, output), "w")
         writer.write(
@@ -165,13 +168,14 @@ class BaseRunner(object):
             with torch.no_grad():
                 model.eval()
                 keys = batch[0]
-                output = self._forward(model, batch, mode="sample",
-                                        max_length=max_length, **kwargs)
+                output = self._forward(model, batch, mode="sample", **kwargs)
                 seqs = output["seqs"].cpu().numpy()
                 for idx, seq in enumerate(seqs):
                     caption = self._convert_idx2sentence(seq, vocabulary, zh=zh)
-                    if isinstance(caption, list):
+                    if zh:
                         sentence = " ".join(caption)
+                    else:
+                        sentence = caption
                     writer.write(tp.row([keys[idx], sentence], width=[len("InputUtterance"), width_length]) + "\n")
                     sentences.append(sentence)
 
@@ -193,12 +197,14 @@ class BaseRunner(object):
 
         dump = torch.load(os.path.join(experiment_path, "saved.pth"),
                           map_location="cpu")
-        model = dump["model"]
+        # Load previous training config
+        config = dump["config"]
+
+        vocabulary = torch.load(config["vocab_file"])
+        model = self._get_model(config, vocabulary)
+        model.load_state_dict(dump["model"])
         # Some scaler (sklearn standardscaler)
         scaler = dump["scaler"]
-        # Also load previous training config
-        config = dump["config"]
-        vocabulary = torch.load(config["vocab_file"])
         zh = config["zh"]
         model = model.to(self.device)
 
@@ -278,7 +284,6 @@ class BaseRunner(object):
             score, scores = scorer.compute_score(key2refs, key2pred)
             f.write("Spice: {:6.3f}\n".format(score))
 
-
         f.close()
 
     def dcase_predict(self,
@@ -290,14 +295,17 @@ class BaseRunner(object):
 
         dump = torch.load(os.path.join(experiment_path, "saved.pth"),
                           map_location="cpu")
-        model = dump["model"]
+        # Load previous training config
+        config = dump["config"]
+
+        vocabulary = torch.load(config["vocab_file"])
+        model = self._get_model(config, len(vocabulary))
+        model.load_state_dict(dump["model"])
         # Some scaler (sklearn standardscaler)
         scaler = dump["scaler"]
-        # Also load previous training config
-        config = dump["config"]
-        vocabulary = torch.load(config["vocab_file"])
         zh = config["zh"]
         model = model.to(self.device)
+
         dataset = SJTUDatasetEval(
             kaldi_stream=kaldi_stream,
             transform=scaler.transform)
@@ -316,7 +324,7 @@ class BaseRunner(object):
             with torch.no_grad():
                 model.eval()
                 keys = batch[0]
-                output = self._forward(model, batch, None, mode="sample", **kwargs)
+                output = self._forward(model, batch, mode="sample", **kwargs)
                 seqs = output["seqs"].cpu().numpy()
                 for idx, seq in enumerate(seqs):
                     caption = self._convert_idx2sentence(seq, vocabulary, zh=zh)

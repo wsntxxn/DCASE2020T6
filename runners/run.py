@@ -14,7 +14,7 @@ import sklearn.preprocessing as pre
 import torch
 from ignite.engine.engine import Engine, Events
 from ignite.metrics import Accuracy, Loss, RunningAverage, Average
-from ignite.handlers import EarlyStopping, ModelCheckpoint
+from ignite.handlers import ModelCheckpoint
 from ignite.contrib.handlers import ProgressBar
 from ignite.utils import convert_tensor
 
@@ -23,13 +23,12 @@ import models
 import utils.train_util as train_util
 from utils.build_vocab import Vocabulary
 from runners.base_runner import BaseRunner
-import utils.score_util as score_util
 from datasets.SJTUDataSet import SJTUDataset, SJTUDatasetEval, collate_fn
 
 class Runner(BaseRunner):
 
     @staticmethod
-    def _get_model(config, vocab_size):
+    def _get_model(config, vocabulary):
         embed_size = config["model_args"]["embed_size"]
         encodermodel = getattr(
             models.encoder, config["encodermodel"])(
@@ -40,12 +39,12 @@ class Runner(BaseRunner):
             encoder_state_dict = torch.load(
                 config["pretrained_encoder"],
                 map_location="cpu")
-            encodermodel.load_state_dict(encoder_state_dict)
+            encodermodel.load_state_dict(encoder_state_dict, strict=False)
 
         decodermodel = getattr(
             models.decoder, config["decodermodel"])(
-            vocab_size=vocab_size,
-            embed_size=embed_size,
+            vocab_size=len(vocabulary),
+            input_size=embed_size,
             **config["decodermodel_args"])
         model = getattr(
             models.WordModel, config["model"])(encodermodel, decodermodel, **config["model_args"])
@@ -55,14 +54,15 @@ class Runner(BaseRunner):
         assert mode in ("train", "sample")
 
         if mode == "sample":
+            kwargs["mode"] = "sample"
             feats = batch[1]
             feat_lens = batch[-1]
 
             feats = convert_tensor(feats.float(),
                                    device=self.device,
                                    non_blocking=True)
-            sampled = model(feats, feat_lens, mode="sample", **kwargs)
-            return sampled
+            output = model(feats, feat_lens, **kwargs)
+            return output
 
         # mode is "train"
         assert "tf" in kwargs, "need to know whether to use teacher forcing"
@@ -81,18 +81,15 @@ class Runner(BaseRunner):
         targets = torch.nn.utils.rnn.pack_padded_sequence(
             caps, cap_lens, batch_first=True).data
 
+        train_mode = "tf" if kwargs["tf"] else "sample"
+        output = model(feats, feat_lens, caps, cap_lens, train_mode=train_mode)
 
-        if kwargs["tf"]:
-            output = model(feats, feat_lens, caps, cap_lens, mode="forward")
-        else:
-            output = model(feats, feat_lens, mode="sample", max_length=max(cap_lens))
-            probs = torch.nn.utils.rnn.pack_padded_sequence(
-                output["probs"], cap_lens, batch_first=True).data
-            probs = convert_tensor(probs, device=self.device, non_blocking=True)
-            output["probs"] = probs
+        packed_logits = torch.nn.utils.rnn.pack_padded_sequence(
+            output["logits"], cap_lens, batch_first=True).data
+        packed_logits = convert_tensor(packed_logits, device=self.device, non_blocking=True)
 
+        output["packed_logits"] = packed_logits
         output["targets"] = targets
-
         return output
 
     def train(self, config, **kwargs):
@@ -127,9 +124,9 @@ class Runner(BaseRunner):
 
         zh = config_parameters["zh"]
         vocabulary = torch.load(config_parameters["vocab_file"])
-        trainloader, cvloader, info = self._get_dataloaders(config_parameters, vocabulary)
+        train_loader, val_loader, info = self._get_dataloaders(config_parameters, vocabulary)
         config_parameters["inputdim"] = info["inputdim"]
-        cv_key2refs = info["cv_key2refs"]
+        val_key2refs = info["val_key2refs"]
         logger.info("<== Estimating Scaler ({}) ==>".format(info["scaler"].__class__.__name__))
         logger.info(
             "Stream: {} Input dimension: {} Vocab Size: {}".format(
@@ -157,8 +154,9 @@ class Runner(BaseRunner):
             with torch.enable_grad():
                 optimizer.zero_grad()
                 output = self._forward(model, batch, tf=tf)
-                loss = criterion(output["probs"], output["targets"])
+                loss = criterion(output["packed_logits"], output["targets"]).to(self.device)
                 loss.backward()
+                # print(loss, list(model.named_parameters())[-1][1].requires_grad, list(model.named_parameters())[-1][1].grad)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
                 optimizer.step()
                 output["loss"] = loss.item()
@@ -185,8 +183,8 @@ class Runner(BaseRunner):
                 return output
 
         metrics = {
-            "loss": Loss(criterion, output_transform=lambda x: (x["probs"], x["targets"])),
-            "accuracy": Accuracy(output_transform=lambda x: (x["probs"], x["targets"])),
+            "loss": Loss(criterion, output_transform=lambda x: (x["packed_logits"], x["targets"])),
+            "accuracy": Accuracy(output_transform=lambda x: (x["packed_logits"], x["targets"])),
         }
 
         evaluator = Engine(_inference)
@@ -198,14 +196,14 @@ class Runner(BaseRunner):
             key2pred.clear()
 
         evaluator.add_event_handler(
-            Events.EPOCH_COMPLETED, eval_cv, key2pred, cv_key2refs)
+            Events.EPOCH_COMPLETED, eval_cv, key2pred, val_key2refs)
 
         for name, metric in metrics.items():
             metric.attach(trainer, name)
             metric.attach(evaluator, name)
 
         trainer.add_event_handler(
-              Events.EPOCH_COMPLETED, train_util.log_results, evaluator, cvloader,
+              Events.EPOCH_COMPLETED, train_util.log_results, evaluator, val_loader,
               logger.info, metrics.keys(), ["loss", "accuracy", "score"])
 
         evaluator.add_event_handler(
@@ -216,11 +214,11 @@ class Runner(BaseRunner):
                 "scaler": info["scaler"]
         }, os.path.join(outputdir, "saved.pth"))
 
-        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        # optimizer, **config_parameters['scheduler_args'])
-        # evaluator.add_event_handler(
-            # Events.EPOCH_COMPLETED, train_util.update_reduce_on_plateau,
-            # scheduler, "score")
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, **config_parameters['scheduler_args'])
+        evaluator.add_event_handler(
+            Events.EPOCH_COMPLETED, train_util.update_reduce_on_plateau,
+            scheduler, "score")
 
         evaluator.add_event_handler(
             Events.EPOCH_COMPLETED, checkpoint_handler, {
@@ -228,13 +226,7 @@ class Runner(BaseRunner):
             }
         )
 
-        # early_stop_handler = EarlyStopping(
-            # patience=config_parameters["early_stop"],
-            # score_function=lambda engine: engine.state.metrics["score"],
-            # trainer=trainer)
-        # evaluator.add_event_handler(Events.COMPLETED, early_stop_handler)
-
-        trainer.run(trainloader, max_epochs=config_parameters["epochs"])
+        trainer.run(train_loader, max_epochs=config_parameters["epochs"])
         return outputdir
 
 
