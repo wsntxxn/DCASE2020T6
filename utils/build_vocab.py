@@ -27,13 +27,13 @@ class Vocabulary(object):
     def __len__(self):
         return len(self.word2idx)
 
-def build_vocab(json:str, threshold:int, keeppunctuation: bool, host_address:str, character_level:bool=False, zh:bool=True ):
+def build_vocab(caption_df:pd.DataFrame, threshold:int, keeppunctuation: bool, host_address:str, character_level:bool=False, zh:bool=True):
     from nltk.parse.corenlp import CoreNLPParser
     from zhon.hanzi import punctuation
     """Build vocabulary from csv file with a given threshold to drop all counts < threshold
 
     Args:
-        csv (string): Input csv file. Needs to be tab separated and having a column named 'caption'
+        caption (string): Input csv file. Needs to be tab separated and having a column named 'caption'
         
         Modiefied:
         json(string): Input json file. Shoud have a column named 'caption'
@@ -43,14 +43,12 @@ def build_vocab(json:str, threshold:int, keeppunctuation: bool, host_address:str
     Returns:
         vocab (Vocab): Object with the processed vocabulary
     """
-    #df = pd.read_csv(csv, sep='\t')
-    df = pd.read_json(json)
     counter = Counter()
     
     if zh:
         parser = CoreNLPParser(host_address)
-        for i in tqdm(range(len(df)), leave=False, ascii=True):
-            caption = str(df.loc[i]['caption'])
+        for i in tqdm(range(len(caption_df)), leave=False, ascii=True):
+            caption = str(caption_df.loc[i]['caption'])
             # Remove all punctuations
             if not keeppunctuation:
                 caption = re.sub("[{}]".format(punctuation),"",caption)
@@ -61,8 +59,10 @@ def build_vocab(json:str, threshold:int, keeppunctuation: bool, host_address:str
             counter.update(tokens)
     else:
         punctuation = ',.()'
-        for i in tqdm(range(len(df)), leave=False, ascii=True):
-            caption = str(df.loc[i]['caption'])
+        for i in tqdm(range(len(caption_df)), leave=False, ascii=True):
+            caption = str(caption_df.loc[i]['caption'])
+            # convert to lower for
+            caption = caption.lower()
             # Remove all punctuations
             if not keeppunctuation:
                 caption = re.sub("[{}]".format(punctuation),"",caption)
@@ -86,10 +86,11 @@ def build_vocab(json:str, threshold:int, keeppunctuation: bool, host_address:str
         vocab.add_word(word)
     return vocab
 
-def process(input_json:str, output_vocab:str, threshold:int = 1, keeppunctuation: bool = False, character_level: bool = False, host_address:str = "http://localhost:9000", zh: bool=True):
+def process(caption_csv:str, output_vocab:str, threshold:int = 1, keeppunctuation: bool = False, character_level: bool = False, host_address:str = "http://localhost:9000", zh: bool=True):
+    caption_df = pd.read_csv(caption_csv)
     logger=logging.Logger("Build Vocab")
     logger.setLevel(logging.INFO)
-    vocab = build_vocab(json=input_json, threshold=threshold, keeppunctuation=keeppunctuation, host_address=host_address, character_level = character_level, zh=zh)
+    vocab = build_vocab(caption_df=caption_df, threshold=threshold, keeppunctuation=keeppunctuation, host_address=host_address, character_level = character_level, zh=zh)
     torch.save(vocab, output_vocab)
     logger.info("Total vocabulary size: {}".format(len(vocab)))
     logger.info("Saved vocab to '{}'".format(output_vocab))

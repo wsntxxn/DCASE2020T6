@@ -11,20 +11,40 @@ class BaseDecoder(nn.Module):
     All decoders should inherit from this class
     """
 
-    def __init__(self, embed_size, vocab_size):
+    def __init__(self, input_size, vocab_size):
         super(BaseDecoder, self).__init__()
-        self.embed_size = embed_size
+        self.input_size = input_size
         self.vocab_size = vocab_size
 
     def forward(self, x):
         raise NotImplementedError
 
+
 class RNNDecoder(BaseDecoder):
 
-    def __init__(self, embed_size, vocab_size):
-        super(RNNDecoder, self).__init__(embed_size, vocab_size)
+    def __init__(self, input_size, vocab_size, **kwargs):
+        super(RNNDecoder, self).__init__(input_size, vocab_size)
+        hidden_size = kwargs.get('hidden_size', 256)
+        num_layers = kwargs.get('num_layers', 1)
+        bidirectional = kwargs.get('bidirectional', False)
+        rnn_type = kwargs.get('rnn_type', "GRU")
+        self.model = getattr(nn, rnn_type)(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=bidirectional)
+        self.classifier = nn.Linear(
+            hidden_size * (bidirectional + 1), vocab_size)
+        nn.init.kaiming_uniform_(self.classifier.weight)
     
     def forward(self, *input, **kwargs):
+        """
+        RNN-style decoder must implement `forward` like this:
+            accept a word embedding input and last time hidden state, return the word
+            logits output and hidden state of this timestep
+        the return dict must contain at least `logits` and `states`
+        """
         if len(input) == 1:
             x = input # x: input word embedding/feature at timestep t
             states = None
@@ -34,66 +54,18 @@ class RNNDecoder(BaseDecoder):
             raise Exception("unknown input type for rnn decoder")
 
         out, states = self.model(x, states)
-        # out: PackedSequence(data: [total_len, hidden_size], batch_sizes: [...])
-        #    or [N, 1, hidden_size]
+        # out: [N, 1, hs], states: [num_layers * num_directionals, N, hs]
 
-        output = {"states": states}
+        output = {
+            "states": states,
+            "logits": self.classifier(out)
+        }
 
-        if "seq_output" in kwargs and kwargs["seq_output"]:
-            if isinstance(out, nn.utils.rnn.PackedSequence):
-                padded_out, lens = nn.utils.rnn.pad_packed_sequence(
-                    out, batch_first=True)
-                N, T, _ = padded_out.shape
-                idxs = torch.arange(T, device="cpu").repeat(N).view(N, T)
-                mask = (idxs < lens.view(-1, 1)).to(padded_out.device)
-                # mask: [N, T]
-                seq_outputs = padded_out * mask.unsqueeze(-1)
-                seq_outputs = seq_outputs.sum(1)
-                seq_outputs = seq_outputs / lens.unsqueeze(1).to(padded_out.device)
-                # seq_outputs: [N, E]
-                output["seq_outputs"] = seq_outputs
-            else:
-                output["hidden"] = out
-
-        probs = self.classifier(out.data)
-        output["probs"] = probs
         return output
 
-
-class GRUDecoder(RNNDecoder):
-
-    def __init__(self, embed_size, vocab_size, **kwargs):
-        super(GRUDecoder, self).__init__(embed_size, vocab_size)
-        hidden_size = kwargs.get('hidden_size', 256)
-        num_layers = kwargs.get('num_layers', 1)
-        bidirectional = kwargs.get('bidirectional', False)
-        self.model = nn.GRU(
-            input_size=embed_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=bidirectional)
-        self.classifier = nn.Linear(
-            hidden_size * (bidirectional + 1), vocab_size)
-        nn.init.kaiming_uniform_(self.classifier.weight)
-
-
-class LSTMDecoder(RNNDecoder):
-
-    def __init__(self, embed_size, vocab_size, **kwargs):
-        super(LSTMDecoder, self).__init__(embed_size, vocab_size)
-        hidden_size = kwargs.get('hidden_size', 256)
-        num_layers = kwargs.get('num_layers', 1)
-        bidirectional = kwargs.get('bidirectional', False)
-        self.model = nn.LSTM(
-            input_size=embed_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=bidirectional)
-        self.classifier = nn.Linear(
-            hidden_size * (bidirectional + 1), vocab_size)
-        nn.init.kaiming_uniform_(self.classifier.weight)
-
-
+    def init_hidden(self, bs):
+        bidirectional = self.model.bidirectional
+        num_layers = self.model.num_layers
+        hidden_size = self.model.hidden_size
+        return torch.zeros((bidirectional + 1) * num_layers, bs, hidden_size)
 
