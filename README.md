@@ -8,8 +8,12 @@ The dataset used for task 6 is [Clotho](https://arxiv.org/abs/1910.09387). To us
 
 For convenience, we rename all the filenames. The comparison between original and new filenames can be found in `data/clotho/filename.csv`. Original caption label files are also reformatted to json files `data/clotho/dev.json` and `data/clotho/eval.json`.
 
-
 # Prequisite Installation
+
+First checkout this repository:
+```bash
+git clone https://github.com/wsntxxn/DCASE2020T6.git --recursive
+```
 
 In order to sucessfully run the code, the following packages and frameworks are required:
 
