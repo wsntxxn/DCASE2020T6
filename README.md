@@ -81,8 +81,13 @@ Training logs and model checkpoints in `OUTPUTPATH/MODEL/TIMESTAMP`.
 
 Predicting and evaluating is done by running `evaluate` function in `runners/*.py` (assume the evaluation labels are in `data/clotho/eval.json`):
 
+We provide submission model weights: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4013181.svg)](https://doi.org/10.5281/zenodo.4013181).
+
+For example, after download `DCASE2020_submission1.pth`, to use it for prediction and evaluation:
 ```bash
-EXP_PATH=***
+EXP_PATH=experiments/CaptionModel/DCASE2020_submission1
+mkdir -p $EXP_PATH
+mv DCASE2020_submission1.pth $EXP_PATH/saved.pth
 export kaldi_stream="copy-feats scp:data/clotho/logmel_eval.scp ark:- |"
 python runners/run.py evaluate $EXP_PATH "$kaldi_stream" data/clotho/eval.json
 ```

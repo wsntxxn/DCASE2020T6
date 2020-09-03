@@ -143,9 +143,8 @@ cython_debug/
 # slurm logs
 logs/
 
-# experiment files
-experiments/
-
 # Jupyter notebooks
 notebooks/
 
+# experiment results
+experiments/*
