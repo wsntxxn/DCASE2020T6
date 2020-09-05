@@ -1,6 +1,6 @@
 outputpath: experiments/
 
-feature_stream: copy-feats scp:data/clotho/logmel_dev.scp ark:- |
+feature_file: data/clotho/logmel_dev.hdf5
 caption_file: data/clotho/dev.json
 vocab_file: data/clotho/vocab.pth
 zh: False

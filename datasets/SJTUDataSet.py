@@ -7,13 +7,14 @@ import pandas as pd
 import numpy as np
 import torch
 
-import utils.kaldi_io as kaldi_io
+# import utils.kaldi_io as kaldi_io
+import h5py
 from utils.build_vocab import Vocabulary
 
 
 class SJTUDataset(torch.utils.data.Dataset):
 
-    def __init__(self, kaldi_stream, caption_df,
+    def __init__(self, feature, caption_df,
                  vocabulary, transform=None):
         """Dataloader for the SJTU Audiocaptioning dataset
 
@@ -24,14 +25,18 @@ class SJTUDataset(torch.utils.data.Dataset):
             transform (function, optional): Defaults to None. Transformation onto the data (function)
         """
         super(SJTUDataset, self).__init__()
-        self._dataset = {k: v for k, v in kaldi_io.read_mat_ark(kaldi_stream)}
+        # self._dataset = {k: v for k, v in kaldi_io.read_mat_ark(kaldi_stream)}
+        self._feature = feature
+        self._dataset = None
         self._transform = transform
         self._caption_df = caption_df
         self._vocabulary = vocabulary
 
     def __getitem__(self, index: int):
         dataid = self._caption_df.iloc[index]["key"]
-        feature = self._dataset[str(dataid)]
+        if self._dataset is None:
+            self._dataset = h5py.File(self._feature, "r")
+        feature = self._dataset[str(dataid)][()]
         tokens = self._caption_df.iloc[[index]]['tokens'].tolist()[0]
         caption = [self._vocabulary('<start>')] + \
             [self._vocabulary(token) for token in tokens] + \
@@ -53,34 +58,26 @@ class SJTUDataset(torch.utils.data.Dataset):
         return len(self._caption_df)
 
 
-class SJTUSentenceDataset(SJTUDataset):
-
-    def __init__(self, kaldi_stream, caption_df, vocabulary,
-                 sentence_embedding, transform=None):
-        super(SJTUSentenceDataset, self).__init__(kaldi_stream,
-            caption_df, vocabulary, transform)
-        self.sentence_embedding = sentence_embedding
-
-    def __getitem__(self, index: int):
-        feature, caption, dataid = super(SJTUSentenceDataset, self).__getitem__(index)
-        dataid = self._caption_df.iloc[index]["key"]
-        caption_id = self._caption_df.iloc[index]["caption_index"]
-        sentence_embedding = self.sentence_embedding["{}_{}".format(dataid, caption_id)]
-        sentence_embedding = torch.as_tensor(sentence_embedding)
-        return feature, caption, sentence_embedding, dataid
-
-scp_pattern = re.compile("(?<=scp:)[^\s]*(?=\s)")
-
 class SJTUDatasetEval(torch.utils.data.Dataset):
     
-    def __init__(self, kaldi_stream, transform=None):
+    def __init__(self, feature, eval_scp, transform=None):
         super(SJTUDatasetEval, self).__init__()
-        self._kaldi_scp = scp_pattern.search(kaldi_stream).group()
-        self._data_generator = kaldi_io.read_mat_ark(kaldi_stream)
+        # self._kaldi_scp = scp_pattern.search(kaldi_stream).group()
+        # self._data_generator = kaldi_io.read_mat_ark(kaldi_stream)
+        self._feature = feature
+        self._dataset = None
+        self._keys = []
+        with open(eval_scp, "r") as f:
+            for line in f.readlines():
+                self._keys.append(line.strip())
         self._transform = transform
 
     def __getitem__(self, index):
-        key, feature = next(self._data_generator)
+        if self._dataset is None:
+            self._dataset = h5py.File(self._feature, "r")
+        key = self._keys[index]
+        feature = self._dataset[key][()]
+        # key, feature = next(self._data_generator)
         if self._transform:
             if isinstance(self._transform, (tuple, list)):
                 for tf in self._transform:
@@ -90,9 +87,7 @@ class SJTUDatasetEval(torch.utils.data.Dataset):
         return key, torch.as_tensor(feature)
 
     def __len__(self):
-        with open(self._kaldi_scp, "r") as f:
-            length = len(f.readlines())
-        return length
+        return len(self._keys)
 
 
 def collate_fn(length_idxs):
