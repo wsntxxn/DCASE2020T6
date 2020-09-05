@@ -38,7 +38,7 @@ class BaseRunner(object):
         for batch in tqdm(
             torch.utils.data.DataLoader(
                 SJTUDataset(
-                    kaldi_stream=config["feature_stream"],
+                    feature=config["feature_file"],
                     caption_df=caption_df,
                     vocabulary=vocabulary,
                 ),
@@ -66,7 +66,7 @@ class BaseRunner(object):
 
         train_loader = torch.utils.data.DataLoader(
             SJTUDataset(
-                kaldi_stream=config["feature_stream"],
+                feature=config["feature_file"],
                 caption_df=train_df,
                 vocabulary=vocabulary,
                 transform=[scaler.transform, augments]
@@ -84,7 +84,7 @@ class BaseRunner(object):
             val_key2refs = val_df.groupby("key")["caption"].apply(list).to_dict()
         val_loader = torch.utils.data.DataLoader(
             SJTUDataset(
-                kaldi_stream=config["feature_stream"],
+                feature=config["feature_file"],
                 caption_df=val_df,
                 vocabulary=vocabulary,
                 transform=scaler.transform
@@ -124,7 +124,8 @@ class BaseRunner(object):
 
     def sample(self,
                experiment_path: str,
-               kaldi_stream,
+               feature_file: str,
+               feature_scp: str,
                output: str="output_word.txt",
                **kwargs):
         """Generate captions given experiment model"""
@@ -145,7 +146,8 @@ class BaseRunner(object):
         zh = config["zh"]
         model = model.to(self.device)
         dataset = SJTUDatasetEval(
-            kaldi_stream=kaldi_stream,
+            feature=feature_file,
+            eval_scp=feature_scp,
             transform=scaler.transform)
         dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -188,7 +190,8 @@ class BaseRunner(object):
 
     def evaluate(self,
                  experiment_path: str,
-                 kaldi_stream: str,
+                 feature_file: str,
+                 feature_scp: str,
                  caption_file: str,
                  caption_output: str = "eval_output.json",
                  score_output: str = "scores.txt",
@@ -209,7 +212,8 @@ class BaseRunner(object):
         model = model.to(self.device)
 
         dataset = SJTUDatasetEval(
-            kaldi_stream=kaldi_stream,
+            feature=feature_file,
+            eval_scp=feature_scp,
             transform=scaler.transform)
         dataloader = torch.utils.data.DataLoader(
             dataset,

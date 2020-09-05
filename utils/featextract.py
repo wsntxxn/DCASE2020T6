@@ -9,9 +9,9 @@ import librosa
 import numpy as np
 import argparse
 from tqdm import tqdm as tqdm
+import h5py
 
-sys.path.append("/mnt/lustre/sjtu/home/xnx98/utils")
-import kaldi_io
+# import utils.kaldi_io as kaldi_io
 
 def extractmfcc(y, fs=44100, **mfcc_params):
     eps = np.spacing(1)
@@ -85,8 +85,8 @@ parser = argparse.ArgumentParser()
 """ Arguments: wavfilelist, n_mfcc, n_fft, win_length, hop_length, htk, fmin, fmax """
 parser.add_argument('-config', type=argparse.FileType('r'), default=None)
 parser.add_argument('wavfilelist', type=str, default=sys.stdin, nargs="+")
-parser.add_argument('out', type=argparse.FileType('wb'),
-                    default=sys.stdout.buffer)
+parser.add_argument('featureout', type=str, default=sys.stdout)
+parser.add_argument('keyout', type=str, default=sys.stdout)
 
 parser.add_argument('-norm', default='mean')
 # parser.add_argument('-concat', default=1, type=int,
@@ -127,15 +127,17 @@ args = parser.parse_args()
 argsdict = vars(args)
 
 # Just for TQDM, usually its not that large anyway
-for line in tqdm(args.wavfilelist):
-    assert os.path.exists(line) and not line.endswith('scp'), "Passed only .scp file, you need to cat it e.g. python featextract.py `cat FILE`"
-    y, sr = librosa.load(line, sr=None, mono=not args.nomono)
-    # Stereo
-    if y.ndim > 1:
-        feat = np.array([args.extractfeat(i, sr, **argsdict) for i in y])
-    else:
-        feat = args.extractfeat(y, sr, **argsdict)
-    # Transpose feat, nsamples to nsamples, feat
-    feat = np.vstack(feat).transpose()
-    kaldi_io.write_mat(args.out, feat, key=os.path.splitext(
-        os.path.basename(line.strip()))[0])
+with h5py.File(args.featureout, "w") as feature_store, open(args.keyout, "w") as key_store:
+    for line in tqdm(args.wavfilelist, ascii=True):
+        assert os.path.exists(line) and not line.endswith('scp'), "Passed only .scp file, you need to cat it e.g. python featextract.py `cat FILE`"
+        key = os.path.splitext(os.path.basename(line.strip()))[0]
+        y, sr = librosa.load(line, sr=None, mono=not args.nomono)
+        # Stereo
+        if y.ndim > 1:
+            feat = np.array([args.extractfeat(i, sr, **argsdict) for i in y])
+        else:
+            feat = args.extractfeat(y, sr, **argsdict)
+        # Transpose feat, nsamples to nsamples, feat
+        feat = np.vstack(feat).transpose()
+        feature_store[key] = feat
+        key_store.write(key + "\n")
