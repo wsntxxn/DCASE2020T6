@@ -22,7 +22,6 @@ from ignite.contrib.handlers import ProgressBar
 from ignite.metrics import Accuracy, Loss, RunningAverage, Average
 
 sys.path.append(os.getcwd())
-# sys.path.append("/mnt/lustre/sjtu/home/xnx98/utils")
 import models
 import utils.train_util as train_util
 from utils.build_vocab import Vocabulary
@@ -135,8 +134,8 @@ class ScstRunner(BaseRunner):
         config_parameters["inputdim"] = info["inputdim"]
         logger.info("<== Estimating Scaler ({}) ==>".format(info["scaler"].__class__.__name__))
         logger.info(
-                "Stream: {} Input dimension: {} Vocab Size: {}".format(
-                config_parameters["feature_stream"], info["inputdim"], len(vocabulary)))
+                "Feature: {} Input dimension: {} Vocab Size: {}".format(
+                config_parameters["feature_file"], info["inputdim"], len(vocabulary)))
         train_key2refs = info["train_key2refs"]
         val_key2refs = info["val_key2refs"]
 

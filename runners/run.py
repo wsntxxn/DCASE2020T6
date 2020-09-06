@@ -129,10 +129,10 @@ class Runner(BaseRunner):
         val_key2refs = info["val_key2refs"]
         logger.info("<== Estimating Scaler ({}) ==>".format(info["scaler"].__class__.__name__))
         logger.info(
-            "Stream: {} Input dimension: {} Vocab Size: {}".format(
-                config_parameters["feature_stream"], info["inputdim"], len(vocabulary)))
+            "Feature: {} Input dimension: {} Vocab Size: {}".format(
+                config_parameters["feature_file"], info["inputdim"], len(vocabulary)))
 
-        model = self._get_model(config_parameters, len(vocabulary))
+        model = self._get_model(config_parameters, vocabulary)
         if "pretrained_word_embedding" in config_parameters:
             embeddings = np.load(config_parameters["pretrained_word_embedding"])
             model.load_word_embeddings(embeddings, tune=config_parameters["tune_word_embedding"], projection=True)
@@ -214,11 +214,6 @@ class Runner(BaseRunner):
                 "scaler": info["scaler"]
         }, os.path.join(outputdir, "saved.pth"))
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, **config_parameters['scheduler_args'])
-        evaluator.add_event_handler(
-            Events.EPOCH_COMPLETED, train_util.update_reduce_on_plateau,
-            scheduler, "score")
 
         evaluator.add_event_handler(
             Events.EPOCH_COMPLETED, checkpoint_handler, {

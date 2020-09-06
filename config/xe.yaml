@@ -1,6 +1,6 @@
 outputpath: experiments/
 
-feature_file: data/clotho/logmel_dev.hdf5
+feature_file: data/clotho/logmel.hdf5
 caption_file: data/clotho/dev.json
 vocab_file: data/clotho/vocab.pth
 zh: False
