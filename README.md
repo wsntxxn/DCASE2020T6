@@ -24,7 +24,7 @@ We save all the keys of the features in a script file (just like kaldi scp) when
 ```bash
 DATA_DIR=`pwd`/data/clotho/wav
 FEATURE_DIR=`pwd`/data/clotho
-python utils/featextract.py `find $DATA_DIR -maxdepth 1 -type f` $FEATURE_DIR/lomgel.hdf5 $FEATURE_DIR/lomgel.scp mfcc -win_length 1764 -hop_length 882 -n_mels 64
+python utils/featextract.py `find $DATA_DIR -maxdepth 1 -type f` $FEATURE_DIR/logmel.hdf5 $FEATURE_DIR/logmel.scp mfcc -win_length 1764 -hop_length 882 -n_mels 64
 ```
 
 The scp file can be further split into a development scp and an evaluation scp according to development-evaluation setting:
