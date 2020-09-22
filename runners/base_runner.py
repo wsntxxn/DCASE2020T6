@@ -53,7 +53,7 @@ class BaseRunner(object):
                 feat, feat_lens, batch_first=True, enforce_sorted=False).data
             scaler.partial_fit(packed_feat)
             inputdim = feat.shape[-1]
-        assert inputdim > 0, "Reading inputstream failed"
+        assert inputdim > 0, "Reading input feature failed"
 
         augments = train_util.parse_augments(config["augments"])
         train_keys = np.random.choice(
@@ -292,7 +292,8 @@ class BaseRunner(object):
 
     def dcase_predict(self,
                       experiment_path: str,
-                      kaldi_stream,
+                      feature_file: str,
+                      predict_scp: str,
                       output: str="predition.csv",
                       **kwargs):
         """kwargs: {'max_length': int, 'method': str, 'beam_size': int}"""
@@ -311,7 +312,8 @@ class BaseRunner(object):
         model = model.to(self.device)
 
         dataset = SJTUDatasetEval(
-            kaldi_stream=kaldi_stream,
+            feature=feature_file,
+            eval_scp=predict_scp,
             transform=scaler.transform)
         dataloader = torch.utils.data.DataLoader(
             dataset,
