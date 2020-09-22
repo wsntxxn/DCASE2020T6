@@ -25,8 +25,8 @@ class Ensemble(object):
     def _ensemble(self, 
                  path1: str, 
                  path2: str, 
-                 kaldi_stream: str,
-                 kaldi_scp: str,
+                 feature_file: str,
+                 predict_scp: str,
                  max_length: int=None):
         dump1 = torch.load(path1, map_location="cpu")
         dump2 = torch.load(path2, map_location="cpu")
@@ -40,8 +40,8 @@ class Ensemble(object):
         vocabulary = torch.load(config["vocab_file"])
         
         dataset = SJTUDatasetEval(
-            kaldi_stream=kaldi_stream,
-            kaldi_scp=kaldi_scp,
+            feature=feature_file,
+            eval_scp=predict_scp,
             transform=scaler.transform)
         # dataset[i]: key, feature
         dataloader = torch.utils.data.DataLoader(
@@ -151,13 +151,13 @@ class Ensemble(object):
     def predict(self,
                 path1: str, 
                 path2: str, 
-                kaldi_stream: str,
-                kaldi_scp: str,
+                feature_file: str,
+                predict_scp: str,
                 max_length: int=None,
                 output: str="prediction.csv"):
 
-        key2pred = self._ensemble(path1, path2, kaldi_stream, 
-                                  kaldi_scp, max_length)
+        key2pred = self._ensemble(path1, path2, feature_file, 
+                                  predict_scp, max_length)
         predictions = []
 
         for key, prediction in key2pred.items():
@@ -167,16 +167,16 @@ class Ensemble(object):
         pred_df = pd.DataFrame(predictions)
         pred_df.to_csv(output, index=False)
 
-    def coco_evaluate(self,
-                      path1: str, 
-                      path2: str, 
-                      kaldi_stream: str,
-                      kaldi_scp: str,
-                      caption_file: str,
-                      max_length: int=None,
-                      output: str="coco_scores.txt"):
-        key2pred = self._ensemble(path1, path2, kaldi_stream, 
-                                  kaldi_scp, max_length)
+    def evaluate(self,
+                 path1: str, 
+                 path2: str, 
+                 feature_file: str,
+                 eval_scp: str,
+                 caption_file: str,
+                 max_length: int=None,
+                 output: str="scores.txt"):
+        key2pred = self._ensemble(path1, path2, feature_file, 
+                                  eval_scp, max_length)
 
         caption_df = pd.read_json(caption_file)
         caption_df["key"] = caption_df["filename"].apply(lambda x: os.path.splitext(x)[0])
